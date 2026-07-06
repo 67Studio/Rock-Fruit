@@ -1,0 +1,606 @@
+local redzlib = loadstring(game:HttpGet("https://raw.githubusercontent.com/tbao143/Library-ui/refs/heads/main/Redzhubui"))()
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local workspace = game:GetService("Workspace")
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = players.LocalPlayer
+
+_G.AutoFarm = false
+_G.AutoMaterial = false
+_G.AutoKillBoss = false
+_G.AutoM1 = true
+_G.SelectedSkills = {Z = true, X = true, C = true, V = false}
+_G.SelectedSlot = 1
+_G.TargetBossName = "GooGooGaaGaa"
+_G.AutoStatsEnabled = false
+_G.UpgradeAmount = "1000"
+_G.AutoStatsSettings = {Melee = false, Defense = false, Sword = false, Power = false}
+_G.HasTeleportedToIsland = false
+_G.AutoRebirthEnabled = false
+
+local actionRemote = replicatedStorage:WaitForChild("Remotes"):WaitForChild("Action")
+local cancelQuestRemote = replicatedStorage:WaitForChild("Modules"):WaitForChild("NetworkFramework"):WaitForChild("NetworkEvent")
+local skillDelay = 0.15
+local questCheckInterval = 3
+local lastQuestTime = 0
+local currentTargetRoot = nil
+local lastNpcTarget = ""
+local isProcessingQuest = false
+
+local matPositionMap = {
+    ["Bacon"] = Vector3.new(-67.018, 7.859, -224.919),
+    ["Bacon Strong"] = Vector3.new(-67.018, 7.859, -224.919),
+    ["Gorilla"] = Vector3.new(-1172.509, 7.398, -1193.154),
+    ["Bacon Tarzan"] = Vector3.new(-1172.509, 7.398, -1193.154),
+    ["Bacon Pirate"] = Vector3.new(-1228.169, 11.51, -61.182),
+    ["Bacon Clown"] = Vector3.new(-1228.169, 11.51, -61.182),
+    ["Bacon Traveler"] = Vector3.new(-944.594, 5.031, 1123.314),
+    ["Bacon Fawkes"] = Vector3.new(-944.594, 5.031, 1123.314),
+    ["Bacon Fisherman"] = Vector3.new(196.577, 12.496, 1029.665),
+    ["Bacon The Deep"] = Vector3.new(196.577, 12.496, 1029.665),
+    ["Bacon Marine Captain"] = Vector3.new(-1055.156, 9.066, -2476.378),
+    ["Bacon Iron"] = Vector3.new(1335.431, 8.986, -998.337),
+    ["Bacon Minerals"] = Vector3.new(1335.431, 8.986, -998.337),
+    ["Bacon Snow"] = Vector3.new(62.811, 9.5, -2406.402),
+    ["Bacon Ice"] = Vector3.new(62.811, 9.5, -2406.402),
+    ["Bacon Lava"] = Vector3.new(1109.942, 6.856, -2179.784),
+    ["Bacon Hellfire"] = Vector3.new(1109.942, 6.856, -2179.784)
+}
+
+local questMap = {
+    {minLv = 0, maxLv = 999, npc = "NPC_Quest1", mob = "Bacon"},
+    {minLv = 1000, maxLv = 1999, npc = "NPC_Quest2", mob = "Bacon Strong"},
+    {minLv = 2000, maxLv = 2999, npc = "NPC_Quest3", mob = "Bacon Traveler"},
+    {minLv = 3000, maxLv = 3999, npc = "NPC_Quest4", mob = "Bacon Fawkes"},
+    {minLv = 4000, maxLv = 4999, npc = "NPC_Quest5", mob = "Bacon Pirate"},
+    {minLv = 5000, maxLv = 5999, npc = "NPC_Quest6", mob = "Bacon Clown"},
+    {minLv = 6000, maxLv = 6999, npc = "NPC_Quest7", mob = "Bacon Tarzan"},
+    {minLv = 7000, maxLv = 7999, npc = "NPC_Quest8", mob = "Gorilla"},
+    {minLv = 8000, maxLv = 8999, npc = "NPC_Quest9", mob = "Bacon Fisherman"},
+    {minLv = 9000, maxLv = 9999, npc = "NPC_Quest10", mob = "Bacon The Deep"},
+    {minLv = 10000, maxLv = 10999, npc = "NPC_Quest11", mob = "Bacon Marine"},
+    {minLv = 11000, maxLv = 11999, npc = "NPC_Quest12", mob = "Bacon Marine Captain"},
+    {minLv = 12000, maxLv = 12999, npc = "NPC_Quest13", mob = "Bacon Rock"},
+    {minLv = 13000, maxLv = 13999, npc = "NPC_Quest14", mob = "Bacon Iron"},
+    {minLv = 14000, maxLv = 14999, npc = "NPC_Quest15", mob = "Bacon Minerals"},
+    {minLv = 15000, maxLv = 15999, npc = "NPC_Quest16", mob = "Bacon Kryptonite"},
+    {minLv = 16000, maxLv = 16999, npc = "NPC_Quest17", mob = "Bacon Snow"},
+    {minLv = 17000, maxLv = 17999, npc = "NPC_Quest18", mob = "Bacon Ice"},
+    {minLv = 18000, maxLv = 18999, npc = "NPC_Quest19", mob = "Bacon Lava"},
+    {minLv = 19000, maxLv = math.huge, npc = "NPC_Quest20", mob = "Bacon Hellfire"}
+}
+
+local function activateBuso()
+    pcall(function() actionRemote:FireServer("Misc", "buso") end)
+end
+
+local function getPlayerLevel()
+    local currentLevel = 1
+    pcall(function()
+        local playerData = localPlayer:FindFirstChild("Data") or replicatedStorage:FindFirstChild("PlayerData") and replicatedStorage.PlayerData:FindFirstChild(localPlayer.Name)
+        if playerData and playerData:FindFirstChild("Level") then
+            currentLevel = playerData.Level.Value
+        else
+            local leaderstats = localPlayer:FindFirstChild("leaderstats")
+            if leaderstats and leaderstats:FindFirstChild("Level") then
+                currentLevel = leaderstats.Level.Value
+            end
+        end
+    end)
+    return currentLevel or 1
+end
+
+local function getCurrentQuestConfig()
+    local level = getPlayerLevel()
+    for _, config in ipairs(questMap) do
+        if level >= config.minLv and level <= config.maxLv then return config end
+    end
+    return questMap[1]
+end
+
+local function closeQuestUI()
+    pcall(function()
+        local playerGui = localPlayer:FindFirstChild("PlayerGui")
+        if playerGui then
+            local frameQuest = playerGui:FindFirstChild("Frame_Quest", true)
+            if frameQuest then
+                local closeButton = frameQuest:FindFirstChild("Close_")
+                if closeButton then firesignal(closeButton.MouseButton1Click) end
+            end
+        end
+    end)
+end
+
+local function abandonCurrentQuest()
+    pcall(function()
+        local args = { "fire", [3] = "Quest", [4] = "Cancel" }
+        cancelQuestRemote:FireServer(unpack(args))
+    end)
+    closeQuestUI()
+end
+
+local function getTargetNPC()
+    local config = getCurrentQuestConfig()
+    local npcFolder = workspace:FindFirstChild("NpcQuest")
+    if npcFolder and config then return npcFolder:FindFirstChild(config.npc) end
+    return nil
+end
+
+local function getToolAtSlot(slotIndex)
+    local backpack = localPlayer:FindFirstChild("Backpack")
+    local character = localPlayer.Character
+    if character and character:FindFirstChildOfClass("Tool") then return character:FindFirstChildOfClass("Tool") end
+    if backpack then
+        local toolItems = {}
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") then table.insert(toolItems, item) end
+        end
+        return toolItems[slotIndex]
+    end
+    return nil
+end
+
+local function equipSelectedSlot()
+    pcall(function()
+        local character = localPlayer.Character
+        if character and not character:FindFirstChildOfClass("Tool") then
+            local targetTool = getToolAtSlot(_G.SelectedSlot)
+            if targetTool and targetTool.Parent ~= character then
+                character:FindFirstChildOfClass("Humanoid"):EquipTool(targetTool)
+            end
+        end
+    end)
+end
+
+local function interactWithNPC(npc, isNewNpc)
+    if not npc or not localPlayer.Character then return end
+    local root = npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildOfClass("Part")
+    local myRoot = localPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root and myRoot then
+        isProcessingQuest = true
+        currentTargetRoot = nil
+        myRoot.CFrame = root.CFrame * CFrame.new(0, 0, -3)
+        task.wait(0.4)
+        if isNewNpc then abandonCurrentQuest(); task.wait(2.0) end
+        local prompt = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then fireproximityprompt(prompt)
+        else
+            local clickDetector = npc:FindFirstChildWhichIsA("ClickDetector", true)
+            if clickDetector then fireclickdetector(clickDetector) end
+        end
+        task.wait(0.4)
+        isProcessingQuest = false
+    end
+end
+
+local function useSkillRemote(skillKey)
+    pcall(function()
+        local targetTool = getToolAtSlot(_G.SelectedSlot)
+        local toolName = targetTool and targetTool.Name or "Combat"
+        actionRemote:FireServer(toolName, skillKey)
+    end)
+end
+
+local function teleportOnceToIsland(targetPos)
+    if _G.HasTeleportedToIsland then return end
+    if not localPlayer.Character or not localPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+    local myRoot = localPlayer.Character.HumanoidRootPart
+    currentTargetRoot = nil
+    myRoot.CFrame = CFrame.new(targetPos + Vector3.new(0, 15, 0))
+    _G.HasTeleportedToIsland = true
+    task.wait(2.5)
+end
+
+local function warpAndOpenSummonMenu()
+    pcall(function()
+        local npc = workspace:FindFirstChild("NpcBoss") and workspace.NpcBoss:FindFirstChild("NPC_SummonBoss")
+        local npcRoot = npc and (npc:FindFirstChild("HumanoidRootPart") or npc:FindFirstChildOfClass("Part"))
+        local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if npcRoot and myRoot then
+            myRoot.CFrame = npcRoot.CFrame * CFrame.new(0, 0, -3)
+            task.wait(0.3)
+            local prompt = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then fireproximityprompt(prompt) end
+        end
+    end)
+end
+
+local function clickSummonAndClose(bossName)
+    local success = false
+    pcall(function()
+        local frameSummon = localPlayer.PlayerGui.HUD.Main.Frame_SummonBoss
+        local summonBtn = frameSummon.ScrollingFrame[bossName].Main.TextButton
+        local closeBtn = frameSummon:FindFirstChild("Close_")
+        if summonBtn then
+            firesignal(summonBtn.MouseButton1Click)
+            task.wait(0.2)
+            if closeBtn then firesignal(closeBtn.MouseButton1Click) end
+            success = true
+        end
+    end)
+    return success
+end
+
+local function getLockedMobTarget()
+    if _G.AutoKillBoss then
+        local bossFolder = workspace:FindFirstChild("Boss")
+        if bossFolder then
+            for _, mob in pairs(bossFolder:GetChildren()) do
+                if string.lower(mob.Name) == string.lower(_G.TargetBossName) then
+                    local root = mob:FindFirstChild("HumanoidRootPart") or mob:FindFirstChildOfClass("Part")
+                    local hum = mob:FindFirstChildOfClass("Humanoid")
+                    if root and (not hum or hum.Health > 0) then return root end
+                end
+            end
+        end
+        return nil
+    end
+
+    local mobFolder = workspace:FindFirstChild("Mob")
+    if not mobFolder then return nil end
+
+    if _G.AutoMaterial then
+        for mobName, isSelected in pairs(_G.SelectedMatMobs) do
+            if isSelected then
+                local targetIslandPos = matPositionMap[mobName]
+                if targetIslandPos then teleportOnceToIsland(targetIslandPos) end
+                for _, mob in pairs(mobFolder:GetChildren()) do
+                    local isMatch = (mob.Name == mobName)
+                    if mobName == "Bacon Minerals" then
+                        isMatch = (mob.Name == "Bacon Minerals" or mob.Name == "Bacon Kryptonite" or mob.Name == "Bacon Iron")
+                    elseif mobName == "Bacon Lava" then
+                        isMatch = (mob.Name == "Bacon Lava" or mob.Name == "Bacon Hellfire")
+                    end
+                    if isMatch then
+                        local root = mob:FindFirstChild("HumanoidRootPart")
+                        local humanoid = mob:FindFirstChildOfClass("Humanoid")
+                        if root and (not humanoid or humanoid.Health > 0) then return root end
+                    end
+                end
+            end
+        end
+    end
+
+    if _G.AutoFarm then
+        local config = getCurrentQuestConfig()
+        if config then
+            for _, mob in pairs(mobFolder:GetChildren()) do
+                if mob.Name == config.mob then
+                    local root = mob:FindFirstChild("HumanoidRootPart")
+                    local humanoid = mob:FindFirstChildOfClass("Humanoid")
+                    if root and (not humanoid or humanoid.Health > 0) then return root end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+runService.Heartbeat:Connect(function()
+    if (_G.AutoFarm or _G.AutoMaterial or _G.AutoKillBoss) and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local root = localPlayer.Character.HumanoidRootPart
+        for _, part in pairs(localPlayer.Character:GetChildren()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+        if currentTargetRoot and currentTargetRoot.Parent then
+            local hum = currentTargetRoot.Parent:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                root.CFrame = (currentTargetRoot.CFrame * CFrame.new(0, 7, 0)) * CFrame.Angles(math.rad(-90), 0, 0)
+            else
+                currentTargetRoot = nil
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if _G.AutoM1 and (_G.AutoFarm or _G.AutoMaterial or _G.AutoKillBoss) and not isProcessingQuest then
+            pcall(function()
+                local character = localPlayer.Character
+                if character and currentTargetRoot then
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    if tool then tool:Activate()
+                    else actionRemote:FireServer("Combat", "attack") end
+                end
+            end)
+        end
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if _G.AutoKillBoss and localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local bossFolder = workspace:FindFirstChild("Boss")
+            local bossFound = false
+            if bossFolder then
+                for _, mob in pairs(bossFolder:GetChildren()) do
+                    if string.lower(mob.Name) == string.lower(_G.TargetBossName) then
+                        local hum = mob:FindFirstChildOfClass("Humanoid")
+                        if not hum or hum.Health > 0 then bossFound = true; break end
+                    end
+                end
+            end
+            if not bossFound then
+                local currentPos = localPlayer.Character.HumanoidRootPart.CFrame
+                warpAndOpenSummonMenu()
+                task.wait(0.5)
+                clickSummonAndClose(_G.TargetBossName)
+                task.wait(0.5)
+                if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    localPlayer.Character.HumanoidRootPart.CFrame = currentPos
+                end
+            end
+        end
+        task.wait(3.0)
+    end
+end)
+
+_G.StartFarmLoopFunc = function()
+    task.spawn(function()
+        local firstConfig = getCurrentQuestConfig()
+        if firstConfig then lastNpcTarget = firstConfig.npc end
+        activateBuso()
+        while _G.AutoFarm or _G.AutoMaterial or _G.AutoKillBoss do
+            if not isProcessingQuest then
+                equipSelectedSlot()
+                if _G.AutoFarm and not _G.AutoMaterial and not _G.AutoKillBoss then
+                    local config = getCurrentQuestConfig()
+                    local currentNPC = getTargetNPC()
+                    if currentNPC and (tick() - lastQuestTime > questCheckInterval) then
+                        local isNewNpc = (config and config.npc ~= lastNpcTarget)
+                        if config then lastNpcTarget = config.npc end
+                        interactWithNPC(currentNPC, isNewNpc)
+                        lastQuestTime = tick()
+                    end
+                end
+                local targetMobRoot = getLockedMobTarget()
+                if targetMobRoot and not isProcessingQuest then
+                    currentTargetRoot = targetMobRoot
+                    local orderedSkills = {"Z", "X", "C", "V"}
+                    for _, skill in ipairs(orderedSkills) do
+                        if (not _G.AutoFarm and not _G.AutoMaterial and not _G.AutoKillBoss) or currentTargetRoot ~= targetMobRoot or isProcessingQuest then break end
+                        if _G.SelectedSkills[skill] then
+                            useSkillRemote(string.lower(skill))
+                            task.wait(skillDelay)
+                        end
+                    end
+                else
+                    currentTargetRoot = nil
+                    task.wait(0.1)
+                end
+            end
+            task.wait(0.01)
+        end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        if _G.AutoStatsEnabled then
+            pcall(function()
+                local pGui = localPlayer:FindFirstChild("PlayerGui")
+                if pGui then
+                    local mainHUD = pGui:FindFirstChild("HUD") or pGui:FindFirstChildWhichIsA("ScreenGui")
+                    local statsFrame = mainHUD and mainHUD:FindFirstChild("Frame_Stats", true)
+                    local statsContainer = statsFrame and statsFrame:FindFirstChild("Stats", true)
+                    if statsContainer then
+                        local gameBox = statsContainer:FindFirstChild("Box")
+                        local gameTextBox = gameBox and gameBox:FindFirstChildWhichIsA("TextBox", true)
+                        if gameTextBox then
+                            gameTextBox.Text = tostring(_G.UpgradeAmount)
+                            pcall(function() gameTextBox:ReleaseFocus(true) end)
+                        end
+                        local containerFrame = statsContainer:FindFirstChild("Frame")
+                        if containerFrame then
+                            for statName, shouldUpgrade in pairs(_G.AutoStatsSettings) do
+                                if shouldUpgrade and _G.AutoStatsEnabled then
+                                    local statCategory = containerFrame:FindFirstChild(statName)
+                                    local plusButton = statCategory and statCategory:FindFirstChild("Plus")
+                                    if plusButton and plusButton.Visible then
+                                        firesignal(plusButton.MouseButton1Click)
+                                        task.wait(0.2)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        if _G.AutoRebirthEnabled then
+            pcall(function()
+                local playerGui = localPlayer:FindFirstChild("PlayerGui")
+                if playerGui then
+                    local frameStats = playerGui:FindFirstChild("Frame_Stats", true)
+                    if frameStats then
+                        local rebirthFrame = frameStats:FindFirstChild("Rebirth")
+                        if rebirthFrame then
+                            local realButton = rebirthFrame:FindFirstChild("Rebirth")
+                            if realButton then
+                                firesignal(realButton.MouseButton1Click)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(0.3)
+    end
+end)
+
+local Window = redzlib:MakeWindow({
+    Title = "Nebula X",
+    SubTitle = "by 67",
+    SaveFolder = "NebulaXConfig"
+})
+
+Window:AddMinimizeButton({
+    Button = {
+        Image = "rbxassetid://71014873973869",
+        BackgroundTransparency = 0
+    },
+    Corner = {
+        CornerRadius = UDim.new(0, 8)
+    }
+})
+
+local CombatTab = Window:MakeTab({"Combat", "sword"})
+local CombatSection = CombatTab:AddSection({"Auto Farm & Skills"})
+
+local Toggle = CombatTab:AddToggle({
+    Name = "Toggle Auto Farm",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoFarm = Value
+        if _G.AutoFarm then
+            _G.AutoMaterial = false
+            _G.AutoKillBoss = false
+            if _G.StartFarmLoopFunc then _G.StartFarmLoopFunc() end
+        end
+    end
+})
+
+local SkillsSection = CombatTab:AddSection({"Skills (Z, X, C, V)"})
+local function createSkillToggle(skill)
+    return CombatTab:AddToggle({
+        Name = "Use " .. skill,
+        Default = _G.SelectedSkills[skill],
+        Callback = function(Value)
+            _G.SelectedSkills[skill] = Value
+        end
+    })
+end
+createSkillToggle("Z")
+createSkillToggle("X")
+createSkillToggle("C")
+createSkillToggle("V")
+
+local M1Toggle = CombatTab:AddToggle({
+    Name = "Auto M1 (Click)",
+    Default = true,
+    Callback = function(Value)
+        _G.AutoM1 = Value
+    end
+})
+
+local SlotDropdown = CombatTab:AddDropdown({
+    Name = "Select Hotbar Slot",
+    Options = {"1", "2", "3", "4", "5"},
+    Default = "1",
+    Callback = function(Option)
+        _G.SelectedSlot = tonumber(Option)
+    end
+})
+
+local MatBossTab = Window:MakeTab({"Materials & Boss", "pickaxe"})
+local MatSection = MatBossTab:AddSection({"Material Farm"})
+
+local MobOptions = {
+    "Bacon", "Bacon Strong", "Gorilla", "Bacon Tarzan", "Bacon Pirate",
+    "Bacon Clown", "Bacon Traveler", "Bacon Fawkes", "Bacon Fisherman",
+    "Bacon The Deep", "Bacon Marine Captain", "Bacon Iron", "Bacon Minerals",
+    "Bacon Snow", "Bacon Ice", "Bacon Lava", "Bacon Hellfire"
+}
+
+_G.SelectedMatMobs = {}
+local MobDropdown = MatBossTab:AddDropdown({
+    Name = "Select Target Mob",
+    Options = MobOptions,
+    Default = "Bacon",
+    Callback = function(Option)
+        for _, name in ipairs(MobOptions) do _G.SelectedMatMobs[name] = false end
+        _G.SelectedMatMobs[Option] = true
+        _G.HasTeleportedToIsland = false
+    end
+})
+
+local MatToggle = MatBossTab:AddToggle({
+    Name = "Start Material Farm",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoMaterial = Value
+        if _G.AutoMaterial then
+            _G.AutoFarm = false
+            _G.AutoKillBoss = false
+            _G.HasTeleportedToIsland = false
+            if _G.StartFarmLoopFunc then _G.StartFarmLoopFunc() end
+        end
+    end
+})
+
+local BossSection = MatBossTab:AddSection({"Boss System"})
+
+local BossToggle = MatBossTab:AddToggle({
+    Name = "Summon & Kill Boss",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoKillBoss = Value
+        if _G.AutoKillBoss then
+            _G.AutoFarm = false
+            _G.AutoMaterial = false
+        end
+    end
+})
+
+local BossDropdown = MatBossTab:AddDropdown({
+    Name = "Select Boss Target",
+    Options = {"GooGooGaaGaa", "Dark Bacon"},
+    Default = "GooGooGaaGaa",
+    Callback = function(Option)
+        _G.TargetBossName = Option
+    end
+})
+
+local StatsTab = Window:MakeTab({"Stats & Rebirth", "chart-bar"})
+local StatsSection = StatsTab:AddSection({"Auto Stats System"})
+
+local StatsToggle = StatsTab:AddToggle({
+    Name = "Enable Auto Stats",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoStatsEnabled = Value
+    end
+})
+
+local function createStatToggle(statName, displayName)
+    return StatsTab:AddToggle({
+        Name = "Upgrade " .. displayName,
+        Default = false,
+        Callback = function(Value)
+            _G.AutoStatsSettings[statName] = Value
+        end
+    })
+end
+createStatToggle("Melee", "Melee")
+createStatToggle("Defense", "Defense")
+createStatToggle("Sword", "Sword")
+createStatToggle("Power", "Fruit & Special")
+
+local AmountInput = StatsTab:AddTextBox({
+    Name = "Upgrade Amount",
+    PlaceholderText = "1000",
+    Callback = function(Text)
+        _G.UpgradeAmount = Text
+    end
+})
+
+local RebirthSection = StatsTab:AddSection({"Auto Rebirth"})
+local RebirthToggle = StatsTab:AddToggle({
+    Name = "Auto Rebirth (Lv. 20000 required)",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoRebirthEnabled = Value
+    end
+})
+
+Window:SelectTab(CombatTab)
+
+redzlib:MakeNotification({
+    Title = "Script Loaded",
+    Content = "Nebula X ready! Use at your own risk.",
+    Duration = 6.5
+})
